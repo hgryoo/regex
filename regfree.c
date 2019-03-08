@@ -1,20 +1,23 @@
 #include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <regex.h>
 
 #include "utils.h"
+#include "include/regex38a.h"
+#include "regmem.ih"
 #include "regex2.h"
 
 /*
- - regfree - free everything
- = extern void regfree(regex_t *);
+ - cub_regfree - free everything
+ = extern void cub_regfree(cub_regex_t *);
  */
 void
-regfree(preg)
-regex_t *preg;
+cub_regfree(preg)
+cub_regex_t *preg;
 {
-	register struct re_guts *g;
+	register struct cub_re_guts *g;
+	if (!cub_malloc_ok ())
+		return;
 
 	if (preg->re_magic != MAGIC1)	/* oops */
 		return;			/* nice to complain, but hard */
@@ -26,12 +29,12 @@ regex_t *preg;
 	g->magic = 0;			/* mark it invalid */
 
 	if (g->strip != NULL)
-		free((char *)g->strip);
+		cub_free(NULL, (char *)g->strip);
 	if (g->sets != NULL)
-		free((char *)g->sets);
+		cub_free(NULL, (char *)g->sets);
 	if (g->setbits != NULL)
-		free((char *)g->setbits);
+		cub_free(NULL, (char *)g->setbits);
 	if (g->must != NULL)
-		free(g->must);
-	free((char *)g);
+		cub_free(NULL, g->must);
+	cub_free(NULL, (char *)g);
 }

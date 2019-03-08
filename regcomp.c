@@ -3,13 +3,12 @@
 #include <string.h>
 #include <ctype.h>
 #include <limits.h>
-#include <stdlib.h>
-#include <regex.h>
 
 #include "utils.h"
+#include "include/regex38a.h"
 #include "regex2.h"
-
 #include "cclass.h"
+#include "regmem.ih"
 #include "cname.h"
 
 /*
@@ -20,11 +19,11 @@ struct parse {
 	char *next;		/* next character in RE */
 	char *end;		/* end of string (-> NUL normally) */
 	int error;		/* has an error been seen? */
-	sop *strip;		/* malloced strip */
-	sopno ssize;		/* malloced strip size (allocated) */
-	sopno slen;		/* malloced strip length (used) */
+	sop *strip;		/* cub_malloced strip */
+	sopno ssize;		/* cub_malloced strip size (allocated) */
+	sopno slen;		/* cub_malloced strip length (used) */
 	int ncsalloc;		/* number of csets allocated */
-	struct re_guts *g;
+	struct cub_re_guts *g;
 #	define	NPAREN	10	/* we need to remember () 1-9 for back refs */
 	sopno pbegin[NPAREN];	/* -> ( ([0] unused) */
 	sopno pend[NPAREN];	/* -> ) ([0] unused) */
@@ -71,64 +70,59 @@ static int never = 0;		/* for use in asserts; shuts lint up */
 #endif
 
 /*
- - regcomp - interface for parser and compilation
- = extern int regcomp(regex_t *, const char *, int);
- = #define	REG_BASIC	0000
- = #define	REG_EXTENDED	0001
- = #define	REG_ICASE	0002
- = #define	REG_NOSUB	0004
- = #define	REG_NEWLINE	0010
- = #define	REG_NOSPEC	0020
- = #define	REG_PEND	0040
- = #define	REG_DUMP	0200
+ - cub_regcomp - interface for parser and compilation
+ = extern int cub_regcomp(cub_regex_t *, const char *, int);
+ = #define	CUB_REG_BASIC	0000
+ = #define	CUB_REG_EXTENDED	0001
+ = #define	CUB_REG_ICASE	0002
+ = #define	CUB_REG_NOSUB	0004
+ = #define	CUB_REG_NEWLINE	0010
+ = #define	CUB_REG_NOSPEC	0020
+ = #define	CUB_REG_PEND	0040
+ = #define	CUB_REG_DUMP	0200
  */
 int				/* 0 success, otherwise REG_something */
-regcomp(preg, pattern, cflags)
-regex_t *preg;
+cub_regcomp(preg, pattern, cflags)
+cub_regex_t *preg;
 const char *pattern;
 int cflags;
 {
 	struct parse pa;
-	register struct re_guts *g;
+	register struct cub_re_guts *g;
 	register struct parse *p = &pa;
 	register int i;
 	register size_t len;
 #ifdef REDEBUG
 #	define	GOODFLAGS(f)	(f)
 #else
-#	define	GOODFLAGS(f)	((f)&~REG_DUMP)
+#	define	GOODFLAGS(f)	((f)&~CUB_REG_DUMP)
 #endif
 
-	cflags = GOODFLAGS(cflags);
-	if ((cflags&REG_EXTENDED) && (cflags&REG_NOSPEC))
-		return(REG_INVARG);
+	if (!cub_malloc_ok ())
+		return CUB_REG_ESPACE;
 
-	if (cflags&REG_PEND) {
+	cflags = GOODFLAGS(cflags);
+	if ((cflags&CUB_REG_EXTENDED) && (cflags&CUB_REG_NOSPEC))
+		return(CUB_REG_INVARG);
+
+	if (cflags&CUB_REG_PEND) {
 		if (preg->re_endp < pattern)
-			return(REG_INVARG);
+			return(CUB_REG_INVARG);
 		len = preg->re_endp - pattern;
 	} else
 		len = strlen((char *)pattern);
 
-	/* do the mallocs early so failure handling is easy */
-	g = (struct re_guts *)malloc(sizeof(struct re_guts) +
+	/* do the cub_mallocs early so failure handling is easy */
+	g = (struct cub_re_guts *)cub_malloc(NULL, sizeof(struct cub_re_guts) +
 							(NC-1)*sizeof(cat_t));
 	if (g == NULL)
-		return(REG_ESPACE);
-	{
-	  /* Patched for CERT Vulnerability Note VU#695940, Feb 2015. */
-	  size_t new_ssize = len/(size_t)2*(size_t)3 + (size_t)1; /* ugh */
-	  if (new_ssize < len || new_ssize > LONG_MAX / sizeof(sop)) {
-	    free((char *) g);
-	    return REG_INVARG;
-	  }
-	  p->ssize = new_ssize;
-	}
-	p->strip = (sop *)malloc(p->ssize * sizeof(sop));
+		return(CUB_REG_ESPACE);
+	p->ssize = len/(size_t)2*(size_t)3 + (size_t)1;	/* ugh */
+	p->strip = (sop *)cub_malloc(NULL, p->ssize * sizeof(sop));
 	p->slen = 0;
 	if (p->strip == NULL) {
-		free((char *)g);
-		return(REG_ESPACE);
+		cub_free(NULL, (char *)g);
+		return(CUB_REG_ESPACE);
 	}
 
 	/* set things up */
@@ -160,9 +154,9 @@ int cflags;
 	/* do it */
 	EMIT(OEND, 0);
 	g->firststate = THERE();
-	if (cflags&REG_EXTENDED)
+	if (cflags&CUB_REG_EXTENDED)
 		p_ere(p, OUT);
-	else if (cflags&REG_NOSPEC)
+	else if (cflags&CUB_REG_NOSPEC)
 		p_str(p);
 	else
 		p_bre(p, OUT, OUT);
@@ -179,14 +173,14 @@ int cflags;
 	preg->re_g = g;
 	preg->re_magic = MAGIC1;
 #ifndef REDEBUG
-	/* not debugging, so can't rely on the assert() in regexec() */
+	/* not debugging, so can't rely on the assert() in cub_regexec() */
 	if (g->iflags&BAD)
-		SETERROR(REG_ASSERT);
+		SETERROR(CUB_REG_ASSERT);
 #endif
 
 	/* win or lose, we're done */
 	if (p->error != 0)	/* lose */
-		regfree(preg);
+		cub_regfree(preg);
 	return(p->error);
 }
 
@@ -210,7 +204,7 @@ int stop;			/* character this ERE should end at */
 		conc = HERE();
 		while (MORE() && (c = PEEK()) != '|' && c != stop)
 			p_ere_exp(p);
-		REQUIRE(HERE() != conc, REG_EMPTY);	/* require nonempty */
+		REQUIRE(HERE() != conc, CUB_REG_EMPTY);	/* require nonempty */
 
 		if (!EAT('|'))
 			break;		/* NOTE BREAK OUT */
@@ -257,7 +251,7 @@ register struct parse *p;
 	pos = HERE();
 	switch (c) {
 	case '(':
-		REQUIRE(MORE(), REG_EPAREN);
+		REQUIRE(MORE(), CUB_REG_EPAREN);
 		p->g->nsub++;
 		subno = p->g->nsub;
 		if (subno < NPAREN)
@@ -270,7 +264,7 @@ register struct parse *p;
 			assert(p->pend[subno] != 0);
 		}
 		EMIT(ORPAREN, subno);
-		MUSTEAT(')', REG_EPAREN);
+		MUSTEAT(')', CUB_REG_EPAREN);
 		break;
 #ifndef POSIX_MISTAKE
 	case ')':		/* happens only if no current unmatched ( */
@@ -281,7 +275,7 @@ register struct parse *p;
 		 * all.  So an unmatched ) is legal POSIX, at least until
 		 * we can get it fixed.
 		 */
-		SETERROR(REG_EPAREN);
+		SETERROR(CUB_REG_EPAREN);
 		break;
 #endif
 	case '^':
@@ -296,15 +290,15 @@ register struct parse *p;
 		p->g->neol++;
 		break;
 	case '|':
-		SETERROR(REG_EMPTY);
+		SETERROR(CUB_REG_EMPTY);
 		break;
 	case '*':
 	case '+':
 	case '?':
-		SETERROR(REG_BADRPT);
+		SETERROR(CUB_REG_BADRPT);
 		break;
 	case '.':
-		if (p->g->cflags&REG_NEWLINE)
+		if (p->g->cflags&CUB_REG_NEWLINE)
 			nonnewline(p);
 		else
 			EMIT(OANY, 0);
@@ -313,12 +307,12 @@ register struct parse *p;
 		p_bracket(p);
 		break;
 	case '\\':
-		REQUIRE(MORE(), REG_EESCAPE);
+		REQUIRE(MORE(), CUB_REG_EESCAPE);
 		c = GETNEXT();
 		ordinary(p, c);
 		break;
 	case '{':		/* okay as ordinary except if digit follows */
-		REQUIRE(!MORE() || !isdigit(PEEK()), REG_BADRPT);
+		REQUIRE(!MORE() || !isdigit(PEEK()), CUB_REG_BADRPT);
 		/* FALLTHROUGH */
 	default:
 		ordinary(p, c);
@@ -334,7 +328,7 @@ register struct parse *p;
 		return;		/* no repetition, we're done */
 	NEXT();
 
-	REQUIRE(!wascaret, REG_BADRPT);
+	REQUIRE(!wascaret, CUB_REG_BADRPT);
 	switch (c) {
 	case '*':	/* implemented as +? */
 		/* this case does not require the (y|) trick, noKLUDGE */
@@ -361,7 +355,7 @@ register struct parse *p;
 		if (EAT(',')) {
 			if (isdigit(PEEK())) {
 				count2 = p_count(p);
-				REQUIRE(count <= count2, REG_BADBR);
+				REQUIRE(count <= count2, CUB_REG_BADBR);
 			} else		/* single number with comma */
 				count2 = INFINITY;
 		} else		/* just a single number */
@@ -370,8 +364,8 @@ register struct parse *p;
 		if (!EAT('}')) {	/* error heuristics */
 			while (MORE() && PEEK() != '}')
 				NEXT();
-			REQUIRE(MORE(), REG_EBRACE);
-			SETERROR(REG_BADBR);
+			REQUIRE(MORE(), CUB_REG_EBRACE);
+			SETERROR(CUB_REG_BADBR);
 		}
 		break;
 	}
@@ -382,7 +376,7 @@ register struct parse *p;
 	if (!( c == '*' || c == '+' || c == '?' ||
 				(c == '{' && MORE2() && isdigit(PEEK2())) ) )
 		return;
-	SETERROR(REG_BADRPT);
+	SETERROR(CUB_REG_BADRPT);
 }
 
 /*
@@ -393,7 +387,7 @@ static void
 p_str(p)
 register struct parse *p;
 {
-	REQUIRE(MORE(), REG_EMPTY);
+	REQUIRE(MORE(), CUB_REG_EMPTY);
 	while (MORE())
 		ordinary(p, GETNEXT());
 }
@@ -436,7 +430,7 @@ register int end2;		/* second terminating character */
 		p->g->neol++;
 	}
 
-	REQUIRE(HERE() != start, REG_EMPTY);	/* require nonempty */
+	REQUIRE(HERE() != start, CUB_REG_EMPTY);	/* require nonempty */
 }
 
 /*
@@ -461,12 +455,12 @@ int starordinary;		/* is a leading * an ordinary character? */
 	assert(MORE());		/* caller should have ensured this */
 	c = GETNEXT();
 	if (c == '\\') {
-		REQUIRE(MORE(), REG_EESCAPE);
+		REQUIRE(MORE(), CUB_REG_EESCAPE);
 		c = BACKSL | (unsigned char)GETNEXT();
 	}
 	switch (c) {
 	case '.':
-		if (p->g->cflags&REG_NEWLINE)
+		if (p->g->cflags&CUB_REG_NEWLINE)
 			nonnewline(p);
 		else
 			EMIT(OANY, 0);
@@ -475,7 +469,7 @@ int starordinary;		/* is a leading * an ordinary character? */
 		p_bracket(p);
 		break;
 	case BACKSL|'{':
-		SETERROR(REG_BADRPT);
+		SETERROR(CUB_REG_BADRPT);
 		break;
 	case BACKSL|'(':
 		p->g->nsub++;
@@ -491,11 +485,11 @@ int starordinary;		/* is a leading * an ordinary character? */
 			assert(p->pend[subno] != 0);
 		}
 		EMIT(ORPAREN, subno);
-		REQUIRE(EATTWO('\\', ')'), REG_EPAREN);
+		REQUIRE(EATTWO('\\', ')'), CUB_REG_EPAREN);
 		break;
 	case BACKSL|')':	/* should not get here -- must be user */
 	case BACKSL|'}':
-		SETERROR(REG_EPAREN);
+		SETERROR(CUB_REG_EPAREN);
 		break;
 	case BACKSL|'1':
 	case BACKSL|'2':
@@ -517,11 +511,11 @@ int starordinary;		/* is a leading * an ordinary character? */
 			(void) dupl(p, p->pbegin[i]+1, p->pend[i]);
 			EMIT(O_BACK, i);
 		} else
-			SETERROR(REG_ESUBREG);
+			SETERROR(CUB_REG_ESUBREG);
 		p->g->backrefs = 1;
 		break;
 	case '*':
-		REQUIRE(starordinary, REG_BADRPT);
+		REQUIRE(starordinary, CUB_REG_BADRPT);
 		/* FALLTHROUGH */
 	default:
 		ordinary(p, (char)c);	/* takes off BACKSL, if any */
@@ -539,7 +533,7 @@ int starordinary;		/* is a leading * an ordinary character? */
 		if (EAT(',')) {
 			if (MORE() && isdigit(PEEK())) {
 				count2 = p_count(p);
-				REQUIRE(count <= count2, REG_BADBR);
+				REQUIRE(count <= count2, CUB_REG_BADBR);
 			} else		/* single number with comma */
 				count2 = INFINITY;
 		} else		/* just a single number */
@@ -548,8 +542,8 @@ int starordinary;		/* is a leading * an ordinary character? */
 		if (!EATTWO('\\', '}')) {	/* error heuristics */
 			while (MORE() && !SEETWO('\\', '}'))
 				NEXT();
-			REQUIRE(MORE(), REG_EBRACE);
-			SETERROR(REG_BADBR);
+			REQUIRE(MORE(), CUB_REG_EBRACE);
+			SETERROR(CUB_REG_BADBR);
 		}
 	} else if (c == (unsigned char)'$')	/* $ (but not \$) ends it */
 		return(1);
@@ -573,7 +567,7 @@ register struct parse *p;
 		ndigits++;
 	}
 
-	REQUIRE(ndigits > 0 && count <= DUPMAX, REG_BADBR);
+	REQUIRE(ndigits > 0 && count <= DUPMAX, CUB_REG_BADBR);
 	return(count);
 }
 
@@ -613,12 +607,12 @@ register struct parse *p;
 		p_b_term(p, cs);
 	if (EAT('-'))
 		CHadd(cs, '-');
-	MUSTEAT(']', REG_EBRACK);
+	MUSTEAT(']', CUB_REG_EBRACK);
 
 	if (p->error != 0)	/* don't mess things up further */
 		return;
 
-	if (p->g->cflags&REG_ICASE) {
+	if (p->g->cflags&CUB_REG_ICASE) {
 		register int i;
 		register int ci;
 
@@ -639,7 +633,7 @@ register struct parse *p;
 				CHsub(cs, i);
 			else
 				CHadd(cs, i);
-		if (p->g->cflags&REG_NEWLINE)
+		if (p->g->cflags&CUB_REG_NEWLINE)
 			CHsub(cs, '\n');
 		if (cs->multis != NULL)
 			mcinvert(p, cs);
@@ -673,7 +667,7 @@ register cset *cs;
 		c = (MORE2()) ? PEEK2() : '\0';
 		break;
 	case '-':
-		SETERROR(REG_ERANGE);
+		SETERROR(CUB_REG_ERANGE);
 		return;			/* NOTE RETURN */
 		break;
 	default:
@@ -684,21 +678,21 @@ register cset *cs;
 	switch (c) {
 	case ':':		/* character class */
 		NEXT2();
-		REQUIRE(MORE(), REG_EBRACK);
+		REQUIRE(MORE(), CUB_REG_EBRACK);
 		c = PEEK();
-		REQUIRE(c != '-' && c != ']', REG_ECTYPE);
+		REQUIRE(c != '-' && c != ']', CUB_REG_ECTYPE);
 		p_b_cclass(p, cs);
-		REQUIRE(MORE(), REG_EBRACK);
-		REQUIRE(EATTWO(':', ']'), REG_ECTYPE);
+		REQUIRE(MORE(), CUB_REG_EBRACK);
+		REQUIRE(EATTWO(':', ']'), CUB_REG_ECTYPE);
 		break;
 	case '=':		/* equivalence class */
 		NEXT2();
-		REQUIRE(MORE(), REG_EBRACK);
+		REQUIRE(MORE(), CUB_REG_EBRACK);
 		c = PEEK();
-		REQUIRE(c != '-' && c != ']', REG_ECOLLATE);
+		REQUIRE(c != '-' && c != ']', CUB_REG_ECOLLATE);
 		p_b_eclass(p, cs);
-		REQUIRE(MORE(), REG_EBRACK);
-		REQUIRE(EATTWO('=', ']'), REG_ECOLLATE);
+		REQUIRE(MORE(), CUB_REG_EBRACK);
+		REQUIRE(EATTWO('=', ']'), CUB_REG_ECOLLATE);
 		break;
 	default:		/* symbol, ordinary character, or range */
 /* xxx revision needed for multichar stuff */
@@ -713,7 +707,7 @@ register cset *cs;
 		} else
 			finish = start;
 /* xxx what about signed chars here... */
-		REQUIRE(start <= finish, REG_ERANGE);
+		REQUIRE(start <= finish, CUB_REG_ERANGE);
 		for (i = start; i <= finish; i++)
 			CHadd(cs, i);
 		break;
@@ -743,7 +737,7 @@ register cset *cs;
 			break;
 	if (cp->name == NULL) {
 		/* oops, didn't find it */
-		SETERROR(REG_ECTYPE);
+		SETERROR(CUB_REG_ECTYPE);
 		return;
 	}
 
@@ -781,13 +775,13 @@ register struct parse *p;
 {
 	register char value;
 
-	REQUIRE(MORE(), REG_EBRACK);
+	REQUIRE(MORE(), CUB_REG_EBRACK);
 	if (!EATTWO('[', '.'))
 		return(GETNEXT());
 
 	/* collating symbol */
 	value = p_b_coll_elem(p, '.');
-	REQUIRE(EATTWO('.', ']'), REG_ECOLLATE);
+	REQUIRE(EATTWO('.', ']'), CUB_REG_ECOLLATE);
 	return(value);
 }
 
@@ -807,7 +801,7 @@ int endc;			/* name ended by endc,']' */
 	while (MORE() && !SEETWO(endc, ']'))
 		NEXT();
 	if (!MORE()) {
-		SETERROR(REG_EBRACK);
+		SETERROR(CUB_REG_EBRACK);
 		return(0);
 	}
 	len = p->next - sp;
@@ -816,7 +810,7 @@ int endc;			/* name ended by endc,']' */
 			return(cp->code);	/* known name */
 	if (len == 1)
 		return(*sp);	/* single character */
-	SETERROR(REG_ECOLLATE);			/* neither */
+	SETERROR(CUB_REG_ECOLLATE);			/* neither */
 	return(0);
 }
 
@@ -875,7 +869,7 @@ register int ch;
 {
 	register cat_t *cap = p->g->categories;
 
-	if ((p->g->cflags&REG_ICASE) && isalpha(ch) && othercase(ch) != ch)
+	if ((p->g->cflags&CUB_REG_ICASE) && isalpha(ch) && othercase(ch) != ch)
 		bothcases(p, ch);
 	else {
 		EMIT(OCHAR, (unsigned char)ch);
@@ -885,7 +879,7 @@ register int ch;
 }
 
 /*
- - nonnewline - emit REG_NEWLINE version of OANY
+ - nonnewline - emit CUB_REG_NEWLINE version of OANY
  == static void nonnewline(register struct parse *p);
  *
  * Boy, is this implementation ever a kludge...
@@ -977,7 +971,7 @@ int to;				/* to this number of times (maybe INFINITY) */
 		repeat(p, copy, from-1, to);
 		break;
 	default:			/* "can't happen" */
-		SETERROR(REG_ASSERT);	/* just in case */
+		SETERROR(CUB_REG_ASSERT);	/* just in case */
 		break;
 	}
 }
@@ -1019,14 +1013,14 @@ register struct parse *p;
 		assert(nc % CHAR_BIT == 0);
 		nbytes = nc / CHAR_BIT * css;
 		if (p->g->sets == NULL)
-			p->g->sets = (cset *)malloc(nc * sizeof(cset));
+			p->g->sets = (cset *)cub_malloc(NULL, nc * sizeof(cset));
 		else
-			p->g->sets = (cset *)realloc((char *)p->g->sets,
+			p->g->sets = (cset *)cub_realloc(NULL, (char *)p->g->sets,
 							nc * sizeof(cset));
 		if (p->g->setbits == NULL)
-			p->g->setbits = (uch *)malloc(nbytes);
+			p->g->setbits = (uch *)cub_malloc(NULL, nbytes);
 		else {
-			p->g->setbits = (uch *)realloc((char *)p->g->setbits,
+			p->g->setbits = (uch *)cub_realloc(NULL, (char *)p->g->setbits,
 								nbytes);
 			/* xxx this isn't right if setbits is now NULL */
 			for (i = 0; i < no; i++)
@@ -1037,7 +1031,7 @@ register struct parse *p;
 								0, css);
 		else {
 			no = 0;
-			SETERROR(REG_ESPACE);
+			SETERROR(CUB_REG_ESPACE);
 			/* caller's responsibility not to do set ops */
 		}
 	}
@@ -1054,7 +1048,7 @@ register struct parse *p;
 }
 
 /*
- - freeset - free a now-unused set
+ - freeset - cub_free a now-unused set
  == static void freeset(register struct parse *p, register cset *cs);
  */
 static void
@@ -1078,7 +1072,7 @@ register cset *cs;
  *
  * The main task here is merging identical sets.  This is usually a waste
  * of time (although the hash code minimizes the overhead), but can win
- * big if REG_ICASE is being used.  REG_ICASE, by the way, is why the hash
+ * big if CUB_REG_ICASE is being used.  CUB_REG_ICASE, by the way, is why the hash
  * is done using addition rather than xor -- all ASCII [aA] sets xor to
  * the same value!
  */
@@ -1165,11 +1159,11 @@ register char *cp;
 
 	cs->smultis += strlen(cp) + 1;
 	if (cs->multis == NULL)
-		cs->multis = malloc(cs->smultis);
+		cs->multis = cub_malloc(NULL, cs->smultis);
 	else
-		cs->multis = realloc(cs->multis, cs->smultis);
+		cs->multis = cub_realloc(NULL, cs->multis, cs->smultis);
 	if (cs->multis == NULL) {
-		SETERROR(REG_ESPACE);
+		SETERROR(CUB_REG_ESPACE);
 		return;
 	}
 
@@ -1195,12 +1189,12 @@ register char *cp;
 	cs->smultis -= len;
 
 	if (cs->smultis == 0) {
-		free(cs->multis);
+		cub_free(NULL, cs->multis);
 		cs->multis = NULL;
 		return;
 	}
 
-	cs->multis = realloc(cs->multis, cs->smultis);
+	cs->multis = cub_realloc(NULL, cs->multis, cs->smultis);
 	assert(cs->multis != NULL);
 }
 
@@ -1267,11 +1261,11 @@ register cset *cs;
 
 /*
  - isinsets - is this character in any sets?
- == static int isinsets(register struct re_guts *g, int c);
+ == static int isinsets(register struct cub_re_guts *g, int c);
  */
 static int			/* predicate */
 isinsets(g, c)
-register struct re_guts *g;
+register struct cub_re_guts *g;
 int c;
 {
 	register uch *col;
@@ -1287,11 +1281,11 @@ int c;
 
 /*
  - samesets - are these two characters in exactly the same sets?
- == static int samesets(register struct re_guts *g, int c1, int c2);
+ == static int samesets(register struct cub_re_guts *g, int c1, int c2);
  */
 static int			/* predicate */
 samesets(g, c1, c2)
-register struct re_guts *g;
+register struct cub_re_guts *g;
 int c1;
 int c2;
 {
@@ -1309,12 +1303,12 @@ int c2;
 
 /*
  - categorize - sort out character categories
- == static void categorize(struct parse *p, register struct re_guts *g);
+ == static void categorize(struct parse *p, register struct cub_re_guts *g);
  */
 static void
 categorize(p, g)
 struct parse *p;
-register struct re_guts *g;
+register struct cub_re_guts *g;
 {
 	register cat_t *cats = g->categories;
 	register int c;
@@ -1461,9 +1455,9 @@ register sopno size;
 	if (p->ssize >= size)
 		return;
 
-	sp = (sop *)realloc(p->strip, size*sizeof(sop));
+	sp = (sop *)cub_realloc(NULL, p->strip, size*sizeof(sop));
 	if (sp == NULL) {
-		SETERROR(REG_ESPACE);
+		SETERROR(CUB_REG_ESPACE);
 		return;
 	}
 	p->strip = sp;
@@ -1472,24 +1466,24 @@ register sopno size;
 
 /*
  - stripsnug - compact the strip
- == static void stripsnug(register struct parse *p, register struct re_guts *g);
+ == static void stripsnug(register struct parse *p, register struct cub_re_guts *g);
  */
 static void
 stripsnug(p, g)
 register struct parse *p;
-register struct re_guts *g;
+register struct cub_re_guts *g;
 {
 	g->nstates = p->slen;
-	g->strip = (sop *)realloc((char *)p->strip, p->slen * sizeof(sop));
+	g->strip = (sop *)cub_realloc(NULL, (char *)p->strip, p->slen * sizeof(sop));
 	if (g->strip == NULL) {
-		SETERROR(REG_ESPACE);
+		SETERROR(CUB_REG_ESPACE);
 		g->strip = p->strip;
 	}
 }
 
 /*
  - findmust - fill in must and mlen with longest mandatory literal string
- == static void findmust(register struct parse *p, register struct re_guts *g);
+ == static void findmust(register struct parse *p, register struct cub_re_guts *g);
  *
  * This algorithm could do fancy things like analyzing the operands of |
  * for common subsequences.  Someday.  This code is simple and finds most
@@ -1500,7 +1494,7 @@ register struct re_guts *g;
 static void
 findmust(p, g)
 struct parse *p;
-register struct re_guts *g;
+register struct cub_re_guts *g;
 {
 	register sop *scan;
 	sop *start;
@@ -1557,7 +1551,7 @@ register struct re_guts *g;
 		return;
 
 	/* turn it into a character string */
-	g->must = malloc((size_t)g->mlen + 1);
+	g->must = cub_malloc(NULL, (size_t)g->mlen + 1);
 	if (g->must == NULL) {		/* argh; just forget it */
 		g->mlen = 0;
 		return;
@@ -1576,12 +1570,12 @@ register struct re_guts *g;
 
 /*
  - pluscount - count + nesting
- == static sopno pluscount(register struct parse *p, register struct re_guts *g);
+ == static sopno pluscount(register struct parse *p, register struct cub_re_guts *g);
  */
 static sopno			/* nesting depth */
 pluscount(p, g)
 struct parse *p;
-register struct re_guts *g;
+register struct cub_re_guts *g;
 {
 	register sop *scan;
 	register sop s;

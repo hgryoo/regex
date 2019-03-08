@@ -11,7 +11,7 @@ typedef unsigned char uch;
 /* switch off assertions (if not already off) if no REDEBUG */
 #ifndef REDEBUG
 #ifndef NDEBUG
-#define	NDEBUG	/* no assertions please */
+#define	NDEBUG			/* no assertions please */
 #endif
 #endif
 #include <assert.h>

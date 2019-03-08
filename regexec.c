@@ -1,5 +1,5 @@
 /*
- * the outer shell of regexec()
+ * the outer shell of cub_regexec()
  *
  * This file includes engine.c *twice*, after muchos fiddling with the
  * macros that code uses.  This lets the same code operate on two different
@@ -7,20 +7,20 @@
  */
 #include <sys/types.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <limits.h>
 #include <ctype.h>
-#include <regex.h>
 
 #include "utils.h"
+#include "include/regex38a.h"
 #include "regex2.h"
+#include "regmem.ih"
 
 static int nope = 0;		/* for use in asserts; shuts lint up */
 
 /* macros for manipulating states, small version */
 #define	states	unsigned
-#define	states1	unsigned	/* for later use in regexec() decision */
+#define	states1	unsigned	/* for later use in cub_regexec() decision */
 #define	CLEAR(v)	((v) = 0)
 #define	SET0(v, n)	((v) &= ~((unsigned)1 << (n)))
 #define	SET1(v, n)	((v) |= (unsigned)1 << (n))
@@ -75,10 +75,10 @@ static int nope = 0;		/* for use in asserts; shuts lint up */
 #define	ASSIGN(d, s)	memcpy(d, s, m->g->nstates)
 #define	EQ(a, b)	(memcmp(a, b, m->g->nstates) == 0)
 #define	STATEVARS	int vn; char *space
-#define	STATESETUP(m, nv)	{ (m)->space = malloc((nv)*(m)->g->nstates); \
-				if ((m)->space == NULL) return(REG_ESPACE); \
+#define	STATESETUP(m, nv)	{ (m)->space = cub_malloc(NULL, (nv)*(m)->g->nstates); \
+				if ((m)->space == NULL) return(CUB_REG_ESPACE); \
 				(m)->vn = 0; }
-#define	STATETEARDOWN(m)	{ free((m)->space); }
+#define	STATETEARDOWN(m)	{ cub_free(NULL, (m)->space); }
 #define	SETUP(v)	((v) = &m->space[m->vn++ * m->g->nstates])
 #define	onestate	int
 #define	INIT(o, n)	((o) = (n))
@@ -95,44 +95,47 @@ static int nope = 0;		/* for use in asserts; shuts lint up */
 #include "engine.c"
 
 /*
- - regexec - interface for matching
- = extern int regexec(const regex_t *, const char *, size_t, \
- =					regmatch_t [], int);
- = #define	REG_NOTBOL	00001
- = #define	REG_NOTEOL	00002
- = #define	REG_STARTEND	00004
- = #define	REG_TRACE	00400	// tracing of execution
- = #define	REG_LARGE	01000	// force large representation
- = #define	REG_BACKR	02000	// force use of backref code
+ - cub_regexec - interface for matching
+ = extern int cub_regexec(const cub_regex_t *, const char *, size_t, size_t, \
+ =					cub_regmatch_t [], int);
+ = #define	CUB_REG_NOTBOL	00001
+ = #define	CUB_REG_NOTEOL	00002
+ = #define	CUB_REG_STARTEND	00004
+ = #define	CUB_REG_TRACE	00400	// tracing of execution
+ = #define	CUB_REG_LARGE	01000	// force large representation
+ = #define	CUB_REG_BACKR	02000	// force use of backref code
  *
  * We put this here so we can exploit knowledge of the state representation
  * when choosing which matcher to call.  Also, by this point the matchers
  * have been prototyped.
  */
 int				/* 0 success, REG_NOMATCH failure */
-regexec(preg, string, nmatch, pmatch, eflags)
-const regex_t *preg;
+cub_regexec(preg, string, size, nmatch, pmatch, eflags)
+const cub_regex_t *preg;
 const char *string;
+size_t size;
 size_t nmatch;
-regmatch_t pmatch[];
+cub_regmatch_t pmatch[];
 int eflags;
 {
-	register struct re_guts *g = preg->re_g;
+	register struct cub_re_guts *g = preg->re_g;
 #ifdef REDEBUG
 #	define	GOODFLAGS(f)	(f)
 #else
-#	define	GOODFLAGS(f)	((f)&(REG_NOTBOL|REG_NOTEOL|REG_STARTEND))
+#	define	GOODFLAGS(f)	((f)&(CUB_REG_NOTBOL|CUB_REG_NOTEOL|CUB_REG_STARTEND))
 #endif
+	if (!cub_malloc_ok ())
+		return (CUB_REG_ESPACE);
 
 	if (preg->re_magic != MAGIC1 || g->magic != MAGIC2)
-		return(REG_BADPAT);
+		return(CUB_REG_BADPAT);
 	assert(!(g->iflags&BAD));
 	if (g->iflags&BAD)		/* backstop for no-debug case */
-		return(REG_BADPAT);
+		return(CUB_REG_BADPAT);
 	eflags = GOODFLAGS(eflags);
 
-	if (g->nstates <= CHAR_BIT*sizeof(states1) && !(eflags&REG_LARGE))
-		return(smatcher(g, (char *)string, nmatch, pmatch, eflags));
+	if (g->nstates <= CHAR_BIT*sizeof(states1) && !(eflags&CUB_REG_LARGE))
+		return(smatcher(g, (char *)string, size, nmatch, pmatch, eflags));
 	else
-		return(lmatcher(g, (char *)string, nmatch, pmatch, eflags));
+		return(lmatcher(g, (char *)string, size, nmatch, pmatch, eflags));
 }

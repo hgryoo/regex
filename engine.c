@@ -30,9 +30,9 @@
 
 /* another structure passed up and down to avoid zillions of parameters */
 struct match {
-	struct re_guts *g;
+	struct cub_re_guts *g;
 	int eflags;
-	regmatch_t *pmatch;	/* [nsub+1] (0 element unused) */
+	cub_regmatch_t *pmatch;	/* [nsub+1] (0 element unused) */
 	char *offp;		/* offsets work from here */
 	char *beginp;		/* start of string -- virtual NUL precedes */
 	char *endp;		/* end of string -- virtual NUL here */
@@ -50,7 +50,7 @@ struct match {
 #ifdef REDEBUG
 #define	SP(t, s, c)	print(m, t, s, c, stdout)
 #define	AT(t, p1, p2, s1, s2)	at(m, t, p1, p2, s1, s2)
-#define	NOTE(str)	{ if (m->eflags&REG_TRACE) printf("=%s\n", (str)); }
+#define	NOTE(str)	{ if (m->eflags&CUB_REG_TRACE) printf("=%s\n", (str)); }
 #else
 #define	SP(t, s, c)	/* nothing */
 #define	AT(t, p1, p2, s1, s2)	/* nothing */
@@ -59,15 +59,16 @@ struct match {
 
 /*
  - matcher - the actual matching engine
- == static int matcher(register struct re_guts *g, char *string, \
- ==	size_t nmatch, regmatch_t pmatch[], int eflags);
+ == static int matcher(register struct cub_re_guts *g, char *string, \
+ ==	size_t size, size_t nmatch, cub_regmatch_t pmatch[], int eflags);
  */
 static int			/* 0 success, REG_NOMATCH failure */
-matcher(g, string, nmatch, pmatch, eflags)
-register struct re_guts *g;
+matcher(g, string, size, nmatch, pmatch, eflags)
+register struct cub_re_guts *g;
 char *string;
+size_t size;
 size_t nmatch;
-regmatch_t pmatch[];
+cub_regmatch_t pmatch[];
 int eflags;
 {
 	register char *endp;
@@ -81,17 +82,17 @@ int eflags;
 	char *stop;
 
 	/* simplify the situation where possible */
-	if (g->cflags&REG_NOSUB)
+	if (g->cflags&CUB_REG_NOSUB)
 		nmatch = 0;
-	if (eflags&REG_STARTEND) {
+	if (eflags&CUB_REG_STARTEND) {
 		start = string + pmatch[0].rm_so;
 		stop = string + pmatch[0].rm_eo;
 	} else {
 		start = string;
-		stop = start + strlen(start);
+		stop = start + size;
 	}
 	if (stop < start)
-		return(REG_INVARG);
+		return(CUB_REG_INVARG);
 
 	/* prescreening; this does wonders for this rather slow code */
 	if (g->must != NULL) {
@@ -100,7 +101,7 @@ int eflags;
 				memcmp(dp, g->must, (size_t)g->mlen) == 0)
 				break;
 		if (dp == stop)		/* we didn't find g->must */
-			return(REG_NOMATCH);
+			return(CUB_REG_NOMATCH);
 	}
 
 	/* match struct setup */
@@ -123,7 +124,7 @@ int eflags;
 		endp = fast(m, start, stop, gf, gl);
 		if (endp == NULL) {		/* a miss */
 			STATETEARDOWN(m);
-			return(REG_NOMATCH);
+			return(CUB_REG_NOMATCH);
 		}
 		if (nmatch == 0 && !g->backrefs)
 			break;		/* no further info needed */
@@ -143,25 +144,25 @@ int eflags;
 
 		/* oh my, he wants the subexpressions... */
 		if (m->pmatch == NULL)
-			m->pmatch = (regmatch_t *)malloc((m->g->nsub + 1) *
-							sizeof(regmatch_t));
+			m->pmatch = (cub_regmatch_t *)cub_malloc(NULL, (m->g->nsub + 1) *
+							sizeof(cub_regmatch_t));
 		if (m->pmatch == NULL) {
 			STATETEARDOWN(m);
-			return(REG_ESPACE);
+			return(CUB_REG_ESPACE);
 		}
 		for (i = 1; i <= m->g->nsub; i++)
 			m->pmatch[i].rm_so = m->pmatch[i].rm_eo = -1;
-		if (!g->backrefs && !(m->eflags&REG_BACKR)) {
+		if (!g->backrefs && !(m->eflags&CUB_REG_BACKR)) {
 			NOTE("dissecting");
 			dp = dissect(m, m->coldp, endp, gf, gl);
 		} else {
 			if (g->nplus > 0 && m->lastpos == NULL)
-				m->lastpos = (char **)malloc((g->nplus+1) *
+				m->lastpos = (char **)cub_malloc(NULL, (g->nplus+1) *
 							sizeof(char *));
 			if (g->nplus > 0 && m->lastpos == NULL) {
-				free(m->pmatch);
+				cub_free(NULL, m->pmatch);
 				STATETEARDOWN(m);
-				return(REG_ESPACE);
+				return(CUB_REG_ESPACE);
 			}
 			NOTE("backref dissect");
 			dp = backref(m, m->coldp, endp, gf, gl, (sopno)0);
@@ -216,9 +217,9 @@ int eflags;
 	}
 
 	if (m->pmatch != NULL)
-		free((char *)m->pmatch);
+		cub_free(NULL, (char *)m->pmatch);
 	if (m->lastpos != NULL)
-		free((char *)m->lastpos);
+		cub_free(NULL, (char *)m->lastpos);
 	STATETEARDOWN(m);
 	return(0);
 }
@@ -435,7 +436,7 @@ sopno lev;			/* PLUS nesting level */
 	register size_t len;
 	register int hard;
 	register sop s;
-	register regoff_t offsave;
+	register cub_regoff_t offsave;
 	register cset *cs;
 
 	AT("back", start, stop, startst, stopst);
@@ -460,25 +461,25 @@ sopno lev;			/* PLUS nesting level */
 				return(NULL);
 			break;
 		case OBOL:
-			if ( (sp == m->beginp && !(m->eflags&REG_NOTBOL)) ||
+			if ( (sp == m->beginp && !(m->eflags&CUB_REG_NOTBOL)) ||
 					(sp < m->endp && *(sp-1) == '\n' &&
-						(m->g->cflags&REG_NEWLINE)) )
+						(m->g->cflags&CUB_REG_NEWLINE)) )
 				{ /* yes */ }
 			else
 				return(NULL);
 			break;
 		case OEOL:
-			if ( (sp == m->endp && !(m->eflags&REG_NOTEOL)) ||
+			if ( (sp == m->endp && !(m->eflags&CUB_REG_NOTEOL)) ||
 					(sp < m->endp && *sp == '\n' &&
-						(m->g->cflags&REG_NEWLINE)) )
+						(m->g->cflags&CUB_REG_NEWLINE)) )
 				{ /* yes */ }
 			else
 				return(NULL);
 			break;
 		case OBOW:
-			if (( (sp == m->beginp && !(m->eflags&REG_NOTBOL)) ||
+			if (( (sp == m->beginp && !(m->eflags&CUB_REG_NOTBOL)) ||
 					(sp < m->endp && *(sp-1) == '\n' &&
-						(m->g->cflags&REG_NEWLINE)) ||
+						(m->g->cflags&CUB_REG_NEWLINE)) ||
 					(sp > m->beginp &&
 							!ISWORD(*(sp-1))) ) &&
 					(sp < m->endp && ISWORD(*sp)) )
@@ -487,9 +488,9 @@ sopno lev;			/* PLUS nesting level */
 				return(NULL);
 			break;
 		case OEOW:
-			if (( (sp == m->endp && !(m->eflags&REG_NOTEOL)) ||
+			if (( (sp == m->endp && !(m->eflags&CUB_REG_NOTEOL)) ||
 					(sp < m->endp && *sp == '\n' &&
-						(m->g->cflags&REG_NEWLINE)) ||
+						(m->g->cflags&CUB_REG_NEWLINE)) ||
 					(sp < m->endp && !ISWORD(*sp)) ) &&
 					(sp > m->beginp && ISWORD(*(sp-1))) )
 				{ /* yes */ }
@@ -655,13 +656,13 @@ sopno stopst;
 		/* is there an EOL and/or BOL between lastc and c? */
 		flagch = '\0';
 		i = 0;
-		if ( (lastc == '\n' && m->g->cflags&REG_NEWLINE) ||
-				(lastc == OUT && !(m->eflags&REG_NOTBOL)) ) {
+		if ( (lastc == '\n' && m->g->cflags&CUB_REG_NEWLINE) ||
+				(lastc == OUT && !(m->eflags&CUB_REG_NOTBOL)) ) {
 			flagch = BOL;
 			i = m->g->nbol;
 		}
-		if ( (c == '\n' && m->g->cflags&REG_NEWLINE) ||
-				(c == OUT && !(m->eflags&REG_NOTEOL)) ) {
+		if ( (c == '\n' && m->g->cflags&CUB_REG_NEWLINE) ||
+				(c == OUT && !(m->eflags&CUB_REG_NOTEOL)) ) {
 			flagch = (flagch == BOL) ? BOLEOL : EOL;
 			i += m->g->neol;
 		}
@@ -744,13 +745,13 @@ sopno stopst;
 		/* is there an EOL and/or BOL between lastc and c? */
 		flagch = '\0';
 		i = 0;
-		if ( (lastc == '\n' && m->g->cflags&REG_NEWLINE) ||
-				(lastc == OUT && !(m->eflags&REG_NOTBOL)) ) {
+		if ( (lastc == '\n' && m->g->cflags&CUB_REG_NEWLINE) ||
+				(lastc == OUT && !(m->eflags&CUB_REG_NOTBOL)) ) {
 			flagch = BOL;
 			i = m->g->nbol;
 		}
-		if ( (c == '\n' && m->g->cflags&REG_NEWLINE) ||
-				(c == OUT && !(m->eflags&REG_NOTEOL)) ) {
+		if ( (c == '\n' && m->g->cflags&CUB_REG_NEWLINE) ||
+				(c == OUT && !(m->eflags&CUB_REG_NOTEOL)) ) {
 			flagch = (flagch == BOL) ? BOLEOL : EOL;
 			i += m->g->neol;
 		}
@@ -796,7 +797,7 @@ sopno stopst;
 
 /*
  - step - map set of states reachable before char to set reachable after
- == static states step(register struct re_guts *g, sopno start, sopno stop, \
+ == static states step(register struct cub_re_guts *g, sopno start, sopno stop, \
  ==	register states bef, int ch, register states aft);
  == #define	BOL	(OUT+1)
  == #define	EOL	(BOL+1)
@@ -810,7 +811,7 @@ sopno stopst;
  */
 static states
 step(g, start, stop, bef, ch, aft)
-register struct re_guts *g;
+register struct cub_re_guts *g;
 sopno start;			/* start state within strip */
 sopno stop;			/* state after stop state within strip */
 register states bef;		/* states reachable before */
@@ -938,7 +939,7 @@ states st;
 int ch;
 FILE *d;
 {
-	register struct re_guts *g = m->g;
+	register struct cub_re_guts *g = m->g;
 	register int i;
 	register int first = 1;
 

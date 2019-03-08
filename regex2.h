@@ -1,19 +1,19 @@
 /*
  * First, the stuff that ends up in the outside-world include file
- = typedef off_t regoff_t;
+ = typedef off_t cub_regoff_t;
  = typedef struct {
  = 	int re_magic;
  = 	size_t re_nsub;		// number of parenthesized subexpressions
- = 	const char *re_endp;	// end pointer for REG_PEND
- = 	struct re_guts *re_g;	// none of your business :-)
- = } regex_t;
+ = 	const char *re_endp;	// end pointer for CUB_REG_PEND
+ = 	struct cub_re_guts *re_g;	// none of your business :-)
+ = } cub_regex_t;
  = typedef struct {
- = 	regoff_t rm_so;		// start of match
- = 	regoff_t rm_eo;		// end of match
- = } regmatch_t;
+ = 	cub_regoff_t rm_so;		// start of match
+ = 	cub_regoff_t rm_eo;		// end of match
+ = } cub_regmatch_t;
  */
 /*
- * internals of regex_t
+ * internals of cub_regex_t
  */
 #define	MAGIC1	((('r'^0200)<<8) | 'e')
 
@@ -90,7 +90,7 @@ typedef struct {
 #define	CHadd(cs, c)	((cs)->ptr[(uch)(c)] |= (cs)->mask, (cs)->hash += (c))
 #define	CHsub(cs, c)	((cs)->ptr[(uch)(c)] &= ~(cs)->mask, (cs)->hash -= (c))
 #define	CHIN(cs, c)	((cs)->ptr[(uch)(c)] & (cs)->mask)
-#define	MCadd(p, cs, cp)	mcadd(p, cs, cp)	/* regcomp() internal fns */
+#define	MCadd(p, cs, cp)	mcadd(p, cs, cp)	/* cub_regcomp() internal fns */
 #define	MCsub(p, cs, cp)	mcsub(p, cs, cp)
 #define	MCin(p, cs, cp)	mcin(p, cs, cp)
 
@@ -100,15 +100,15 @@ typedef unsigned char cat_t;
 /*
  * main compiled-expression structure
  */
-struct re_guts {
+struct cub_re_guts {
 	int magic;
 #		define	MAGIC2	((('R'^0200)<<8)|'E')
-	sop *strip;		/* malloced area for strip */
+	sop *strip;		/* cub_malloced area for strip */
 	int csetsize;		/* number of bits in a cset vector */
 	int ncsets;		/* number of csets in use */
 	cset *sets;		/* -> cset [ncsets] */
 	uch *setbits;		/* -> uch[csetsize][ncsets/CHAR_BIT] */
-	int cflags;		/* copy of regcomp() cflags argument */
+	int cflags;		/* copy of cub_regcomp() cflags argument */
 	sopno nstates;		/* = number of sops */
 	sopno firststate;	/* the initial OEND (normally 0) */
 	sopno laststate;	/* the final OEND */
